@@ -75,4 +75,10 @@ func (db *DB) FixFolderID(dashboardsMapping map[string]string, logger *logrus.Lo
 	return nil
 }
 
-//perconalab/pmm-server-fb:PR-2086-de939d3
+func (db *DB) FixHomeDashboard() error {
+	_, err := db.conn.Exec("UPDATE preferences SET home_dashboard_id=0 WHERE org_id=1;")
+	if err != nil {
+		return err
+	}
+	return nil
+}
