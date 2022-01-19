@@ -90,6 +90,18 @@ func main() {
 		log.Fatalf("❌ %v - failed to import dump file to Postgres.", err)
 	}
 	log.Infoln("✅ Imported dump file to Postgres")
+
+	// Get folder/dashboard relationshio for fixing after upgrade
+	dashboardFolders, err := sqlite.GetFoldersForDashboards(f.Name())
+	if err != nil {
+		log.Fatalf("❌ %v - failed to get relationship between folders and dashboards.", err)
+	}
+	log.Infoln("✅ Got folder/dashboard relationship from SQLite")
+
+	if err := db.FixFolderID(dashboardFolders, log); err != nil {
+		log.Fatalf("❌ %v - failed to fix folders ID.", err)
+	}
+	log.Infoln("✅ Folders ID was fixed")
 	log.Infoln("🎉 All done!")
 
 }
