@@ -82,3 +82,16 @@ func (db *DB) FixHomeDashboard() error {
 	}
 	return nil
 }
+
+func (db *DB) ChangeCharToText() error {
+	// TODO This may break grafana migrations in the future. We'll need to find better solution
+	_, err := db.conn.Exec("ALTER TABLE tag ALTER COLUMN key TYPE text;")
+	if err != nil {
+		return err
+	}
+	_, err = db.conn.Exec("ALTER TABLE tag ALTER COLUMN value TYPE text;")
+	if err != nil {
+		return err
+	}
+	return nil
+}
