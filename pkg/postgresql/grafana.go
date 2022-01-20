@@ -54,6 +54,9 @@ func (db *DB) FixFolderID(dashboardsMapping map[string]string, logger *logrus.Lo
 		if err != nil {
 			return err
 		}
+		if dashboardFolderID == 0 {
+			continue
+		}
 		currentFolder := foldersIDToSlug[dashboardFolderID]
 		targetFolder := dashboardsMapping[dashboardSlug]
 		if currentFolder != targetFolder {
