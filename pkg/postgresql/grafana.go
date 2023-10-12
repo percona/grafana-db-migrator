@@ -1,7 +1,7 @@
 package postgresql
 
 import (
-	"encoding/hex"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"strings"
 )
@@ -42,7 +42,7 @@ func (db *DB) FixFolderID(dashboardsMapping map[string]string, logger *logrus.Lo
 	foldersIDToSlug := reverseMap(foldersSlugToID)
 
 	// Get dashboards from postgres
-	rows, err = db.conn.Query("SELECT slug, folder_id FROM dashboard WHERE is_folder=false;")
+	rows, err = db.conn.Query("SELECT slug, folder_id FROM dashboard WHERE is_folder=false order by folder_id DESC;")
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,15 @@ func (db *DB) FixFolderID(dashboardsMapping map[string]string, logger *logrus.Lo
 			logger.Infof("💡 Replace folder id for %v to %v", dashboardSlug, targetFolderId)
 			res, err := db.conn.Exec("UPDATE dashboard SET folder_id = $1 WHERE slug = $2;", targetFolderId, dashboardSlug)
 			if err != nil {
-				return err
+				if strings.Contains(err.Error(), "UQE_dashboard_org_id_folder_id_title") {
+					logger.Infof("💡 Removing duplicated dashboard %v from folder %v", dashboardSlug, dashboardFolderID)
+					res, err = db.conn.Exec("DELETE FROM dashboard WHERE folder_id = $1 AND slug = $2;", dashboardFolderID, dashboardSlug)
+					if err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
 			}
 			count, err := res.RowsAffected()
 			if err != nil {
@@ -83,41 +91,18 @@ func (db *DB) FixFolderID(dashboardsMapping map[string]string, logger *logrus.Lo
 
 func (db *DB) ChangeHEXToText(logger *logrus.Logger) error {
 	for _, change := range HexDataChanges {
-		for _, column := range change.Columns {
-			err := db.changeHexToTextInTable(change, column, logger)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-func (db *DB) changeHexToTextInTable(change TableChange, column Column, logger *logrus.Logger) error {
-	rows, err := db.conn.Query("SELECT id," + column.Name + " FROM " + change.Table)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int
-		var hexColumn string
-		err = rows.Scan(&id, &hexColumn)
+		logger.Infof("💡 Replace hex values for %v in %v", change.ColumnName, change.Table)
+		stmt := "UPDATE " + change.Table + " SET " + change.ColumnName + " = convert_from(" + change.ColumnName + "::bytea, 'UTF8')"
+		db.log.Debugln("Executing: ", stmt)
+		res, err := db.conn.Exec(stmt)
 		if err != nil {
-			return err
-		}
-		newValue, err := hex.DecodeString(strings.TrimPrefix(hexColumn, `\x`))
-		if err != nil {
-			return err
-		}
-		res, err := db.conn.Exec("UPDATE "+change.Table+" SET "+column.Name+" = $1 WHERE id = $2;", newValue, id)
-		if err != nil {
-			return err
+			return fmt.Errorf("couldn't update table %s: %q", change.Table, err)
 		}
 		count, err := res.RowsAffected()
 		if err != nil {
 			return err
 		}
-		logger.Infof("💡 %v rows was fixed", count)
+		logger.Infof("💡 %v rows was fixed %s", count, change.Table)
 	}
 	return nil
 }
@@ -143,37 +128,25 @@ func (db *DB) ChangeCharToText() error {
 	return nil
 }
 
-var HexDataChanges = []TableChange{
+// HexChange documents a table that needs to be changed
+// and specificly which Columns need to be changed.
+type HexChange struct {
+	Table string
+	// Name of the column where value is stored
+	ColumnName string
+}
+
+var HexDataChanges = []HexChange{
 	{
-		Table: "library_element",
-		Columns: []Column{
-			{
-				Name: "model",
-			},
-		},
+		Table:      "library_element",
+		ColumnName: "model",
 	},
 	{
-		Table: "data_keys",
-		Columns: []Column{
-			{
-				Name: "encrypted_data",
-			},
-		},
+		Table:      "data_source",
+		ColumnName: "json_data",
 	},
 	{
-		Table: "data_source",
-		Columns: []Column{
-			{
-				Name: "json_data",
-			},
-		},
-	},
-	{
-		Table: "preferences",
-		Columns: []Column{
-			{
-				Name: "json_data",
-			},
-		},
+		Table:      "preferences",
+		ColumnName: "json_data",
 	},
 }
