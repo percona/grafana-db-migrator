@@ -20,7 +20,7 @@ var (
 	resetHomeDashboard = app.Flag("reset-home-dashboard", "Reset home dashboard for default organization").Bool()
 	changeCharToText   = app.Flag("change-char-to-text", "Change CHAR filed to TEXT").Bool()
 	// fix relationshop between dashboard and folders (provisioning error)
-	fixFoldersID       = app.Flag("fix-folders-id", "Fix correlation between folders and dashboards").Bool()
+	fixFoldersID = app.Flag("fix-folders-id", "Fix correlation between folders and dashboards").Bool()
 )
 
 func main() {
@@ -114,6 +114,11 @@ func main() {
 		log.Fatalf("❌ %v - failed to import dump file to Postgres.", err)
 	}
 	log.Infoln("✅ Imported dump file to Postgres")
+
+	if err := db.ChangeHEXToText(log); err != nil {
+		log.Fatalf("❌ %v - failed to change hex values in Postgres.", err)
+	}
+	log.Infoln("✅ Fixed hex values in Postgres")
 
 	if *resetHomeDashboard {
 		if err := db.FixHomeDashboard(); err != nil {
