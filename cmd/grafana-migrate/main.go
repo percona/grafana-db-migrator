@@ -54,13 +54,16 @@ func main() {
 			log.Fatalf("❌ %v - failed to connect to Postgres database.", err)
 		}
 		// Get folder/dashboard relationshio for fixing after upgrade
-		dashboardFolders, err := sqlite.GetFoldersForDashboards(f.Name())
+		sqliteDashboardTree, sqliteFolders, err := sqlite.GetFolders(f.Name())
 		if err != nil {
 			log.Fatalf("❌ %v - failed to get relationship between folders and dashboards.", err)
 		}
 		log.Infoln("✅ got folder/dashboard relationship from SQLite")
+		if len(sqliteFolders) != 0 {
+			log.Warnf("⚠️ Found %d orphaned folders in SQLite", len(sqliteFolders))
+		}
 
-		if err := db.FixFolderID(dashboardFolders, log); err != nil {
+		if err := db.FixFolderID(sqliteDashboardTree); err != nil {
 			log.Fatalf("❌ %v - failed to fix folders ID.", err)
 		}
 		log.Infoln("✅ folders ID was fixed")
@@ -115,7 +118,7 @@ func main() {
 	}
 	log.Infoln("✅ Imported dump file to Postgres")
 
-	if err := db.ChangeHEXToText(log); err != nil {
+	if err := db.ChangeHEXToText(); err != nil {
 		log.Fatalf("❌ %v - failed to change hex values in Postgres.", err)
 	}
 	log.Infoln("✅ Fixed hex values in Postgres")
