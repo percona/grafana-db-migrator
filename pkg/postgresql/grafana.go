@@ -1,81 +1,81 @@
 package postgresql
 
 import (
-	"github.com/sirupsen/logrus"
+	"fmt"
+	"github.com/percona/grafana-db-migrator/pkg/common"
 )
 
-func reverseMap(m map[string]int) map[int]string {
-	n := make(map[int]string, len(m))
-	for k, v := range m {
-		n[v] = k
-	}
-	return n
+func (db *DB) FixFolderID(sqliteFolders *common.Tree) error {
+	return db.fixFolders(sqliteFolders)
 }
 
-// dashboardMapping is map[dashboardSlug]folderName
-func (db *DB) FixFolderID(dashboardsMapping map[string]string, logger *logrus.Logger) error {
-	foldersSlugToID := make(map[string]int)
-
-	// Get folders
-	rows, err := db.conn.Query("SELECT id,slug FROM dashboard WHERE is_folder=true;")
+func (db *DB) fixFolders(sqliteFolders *common.Tree) error {
+	folders, err := db.getFolders(sqliteFolders.ID)
 	if err != nil {
 		return err
+	}
+	for slug, sqliteFolder := range sqliteFolders.SubFolders {
+		if pgFolder, ok := folders[slug]; ok {
+			if pgFolder.ID != sqliteFolder.ID {
+				res, err := db.conn.Exec("UPDATE dashboard SET id = $1 WHERE id = $2;", sqliteFolder.ID, pgFolder.ID)
+				if err != nil {
+					return err
+				}
+				db.log.Infof("💡 Replace folder id for %v to %v", pgFolder.ID, sqliteFolder.ID)
+				count, err := res.RowsAffected()
+				if err != nil {
+					return err
+				}
+				db.log.Infof("💡 %v rows was fixed", count)
+			}
+			err = db.fixFolders(sqliteFolder)
+			if err != nil {
+				return err
+			}
+		} else {
+			db.log.Warnf("⚠️couldn't find copy of folder %s in PG", sqliteFolder.Slug)
+		}
+	}
+	return nil
+}
+
+func (db *DB) getFolders(id int) (map[string]*common.Folder, error) {
+	folders := make(map[string]*common.Folder)
+	rows, err := db.conn.Query("select id, slug, folder_id from dashboard where folder_id = $1 and is_folder=TRUE", id)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var folderId int
+		var id int
 		var folderSlug string
-
-		err = rows.Scan(&folderId, &folderSlug)
+		var parentFolder int
+		err = rows.Scan(&id, &folderSlug, &parentFolder)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		foldersSlugToID[folderSlug] = folderId
+		folders[folderSlug] = &common.Folder{
+			ID:             id,
+			Slug:           folderSlug,
+			ParentFolderID: parentFolder,
+		}
 	}
-	err = rows.Err()
-	if err != nil {
-		return err
-	}
-	foldersIDToSlug := reverseMap(foldersSlugToID)
+	return folders, nil
+}
 
-	// Get dashboards from postgres
-	rows, err = db.conn.Query("SELECT slug, folder_id FROM dashboard WHERE is_folder=false;")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var dashboardFolderID int
-		var dashboardSlug string
-
-		err = rows.Scan(&dashboardSlug, &dashboardFolderID)
+func (db *DB) ChangeHEXToText() error {
+	for _, change := range HexDataChanges {
+		db.log.Infof("💡 Replace hex values for %v in %v", change.ColumnName, change.Table)
+		stmt := "UPDATE " + change.Table + " SET " + change.ColumnName + " = convert_from(" + change.ColumnName + "::bytea, 'UTF8') WHERE starts_with(" + change.ColumnName + ", '\\x')"
+		db.log.Debugln("Executing: ", stmt)
+		res, err := db.conn.Exec(stmt)
 		if err != nil {
-			return err
+			return fmt.Errorf("couldn't update table %s: %q", change.Table, err)
 		}
-		currentFolder := foldersIDToSlug[dashboardFolderID]
-		targetFolder := dashboardsMapping[dashboardSlug]
-		if currentFolder != targetFolder {
-			targetFolderId := foldersSlugToID[targetFolder]
-			// it means dashboard not exist
-			if targetFolderId == 0 {
-				continue
-			}
-			logger.Infof("💡 Replace folder id for %v to %v", dashboardSlug, targetFolderId)
-			res, err := db.conn.Exec("UPDATE dashboard SET folder_id = $1 WHERE slug = $2;", targetFolderId, dashboardSlug)
-			if err != nil {
-				return err
-			}
-			count, err := res.RowsAffected()
-			if err != nil {
-				return err
-			}
-			logger.Infof("💡 %v rows was fixed", count)
-		}
-
+		count, _ := res.RowsAffected()
+		db.log.Infof("💡 %v rows was fixed %s", count, change.Table)
 	}
-
 	return nil
 }
 
@@ -98,4 +98,27 @@ func (db *DB) ChangeCharToText() error {
 		return err
 	}
 	return nil
+}
+
+// HexChange documents a table that needs to be changed
+// and specificly which Columns need to be changed.
+type HexChange struct {
+	Table string
+	// Name of the column where value is stored
+	ColumnName string
+}
+
+var HexDataChanges = []HexChange{
+	{
+		Table:      "library_element",
+		ColumnName: "model",
+	},
+	{
+		Table:      "data_source",
+		ColumnName: "json_data",
+	},
+	{
+		Table:      "preferences",
+		ColumnName: "json_data",
+	},
 }

@@ -67,6 +67,7 @@ func (db *DB) ImportDump(dumpFile string) error {
 		if _, err := db.conn.Exec(stmt); err != nil {
 			// We can safely ignore "duplicate key value violates unique constraint" errors.
 			if strings.Contains(err.Error(), "duplicate key") {
+				db.log.Warnf("duplicate key: %s", err)
 				continue
 			} else if strings.Contains(err.Error(), "is of type bytes but expression is of type text") {
 				// TODO(wbh1): This is absolutely horrible and I am ashamed of this code. Should figure out column types ahead of time.

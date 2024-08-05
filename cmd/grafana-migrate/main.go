@@ -20,7 +20,7 @@ var (
 	resetHomeDashboard = app.Flag("reset-home-dashboard", "Reset home dashboard for default organization").Bool()
 	changeCharToText   = app.Flag("change-char-to-text", "Change CHAR filed to TEXT").Bool()
 	// fix relationshop between dashboard and folders (provisioning error)
-	fixFoldersID       = app.Flag("fix-folders-id", "Fix correlation between folders and dashboards").Bool()
+	fixFoldersID = app.Flag("fix-folders-id", "Fix correlation between folders and dashboards").Bool()
 )
 
 func main() {
@@ -54,13 +54,16 @@ func main() {
 			log.Fatalf("❌ %v - failed to connect to Postgres database.", err)
 		}
 		// Get folder/dashboard relationshio for fixing after upgrade
-		dashboardFolders, err := sqlite.GetFoldersForDashboards(f.Name())
+		sqliteDashboardTree, sqliteFolders, err := sqlite.GetFolders(f.Name())
 		if err != nil {
 			log.Fatalf("❌ %v - failed to get relationship between folders and dashboards.", err)
 		}
 		log.Infoln("✅ got folder/dashboard relationship from SQLite")
+		if len(sqliteFolders) != 0 {
+			log.Warnf("⚠️ Found %d orphaned folders in SQLite", len(sqliteFolders))
+		}
 
-		if err := db.FixFolderID(dashboardFolders, log); err != nil {
+		if err := db.FixFolderID(sqliteDashboardTree); err != nil {
 			log.Fatalf("❌ %v - failed to fix folders ID.", err)
 		}
 		log.Infoln("✅ folders ID was fixed")
@@ -114,6 +117,11 @@ func main() {
 		log.Fatalf("❌ %v - failed to import dump file to Postgres.", err)
 	}
 	log.Infoln("✅ Imported dump file to Postgres")
+
+	if err := db.ChangeHEXToText(); err != nil {
+		log.Fatalf("❌ %v - failed to change hex values in Postgres.", err)
+	}
+	log.Infoln("✅ Fixed hex values in Postgres")
 
 	if *resetHomeDashboard {
 		if err := db.FixHomeDashboard(); err != nil {
